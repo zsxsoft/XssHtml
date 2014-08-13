@@ -33,8 +33,10 @@ class XssHtml {
 	private $m_dom;
 	private $m_xss;
 	private $m_ok;
-	private $m_AllowAttr = array('title', 'src', 'href', 'id', 'class', 'style', 'width', 'height', 'alt', 'target', 'align');
-	private $m_AllowTag = array('a', 'img', 'br', 'strong', 'b', 'code', 'pre', 'p', 'div', 'em', 'span', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'table', 'ul', 'ol', 'tr', 'th', 'td', 'hr', 'li', 'u');
+	private $m_AllowAttr = array('title', 'src', 'href', 'style', 'width', 'height', 'alt', 'target');
+	private $m_AllowTag = array('a', 'img', 'br', 'strong', 'code', 'pre', 'p', 'div', 'em', 'span');
+	private $m_host = '';
+	private $m_defaultimg = '';
 
 	/**
      * 构造函数
@@ -78,11 +80,36 @@ class XssHtml {
 		return strip_tags($this->m_dom->saveHTML(), '<' . implode('><', $this->m_AllowTag) . '>');
 	}
 
+	/**
+     * 设置域名不存在返回的地址
+     */
+	public function setHost($url)
+	{
+		$this->m_host = $url;
+	}
+
+	/**
+     * 设置图片为非本地图片时自动替换的地址
+     */
+	public function setDefaultImg($url)
+	{
+		$this->m_defaultimg = $url;
+	}
+
 	private function __true_url($url){
-		if (preg_match('#^https?://.+#is', $url)) {
+		if (preg_match('#^(https?|ftp|ed2k)://.+#is', $url)) {
 			return $url;
 		}else{
-			return 'http://' . $url;
+			return $this->m_host . $url;
+		}
+	}
+
+	private function __true_src($url){
+		$url = $this->__true_url($url);
+		if (stripos('a' . $url, $this->m_host)) {
+			return $url;
+		}else{
+			return $this->m_defaultimg;
 		}
 	}
 
@@ -92,6 +119,10 @@ class XssHtml {
 			$style = str_replace('\\', ' ', $style);
 			$style = str_replace(array('&#', '/*', '*/'), ' ', $style);
 			$style = preg_replace('#e.*x.*p.*r.*e.*s.*s.*i.*o.*n#Uis', ' ', $style);
+			$style = str_replace('-', '_', $style);
+			$style = preg_replace('/\b((?!color|decoration)[a-zA-Z0-9\_])+:(.+?)(;|$)/si', '', $style);
+			$style = str_replace('_', '-', $style);
+			$style = trim($style);
 			return $style;
 		}else{
 			return '';
@@ -107,9 +138,21 @@ class XssHtml {
 		}
 	}
 
+	private function __get_src($node, $att){
+		$link = $node->attributes->getNamedItem($att);
+		if ($link) {
+			return $this->__true_src($link->nodeValue);
+		}else{
+			return '';
+		}
+	}
+
 	private function __setAttr($dom, $attr, $val){
 		if (!empty($val)) {
 			$dom->setAttribute($attr, $val);
+		}
+		else {
+			$dom->removeAttribute($attr);
 		}
 	}
 
@@ -135,6 +178,7 @@ class XssHtml {
 		foreach ($list as $attr) {
 			$node->removeAttribute($attr);
 		}
+
 		$style = $this->__get_style($node);
 		$this->__setAttr($node, 'style', $style);
 		$this->__set_default_attr($node, 'title');
@@ -145,7 +189,8 @@ class XssHtml {
 	private function __node_img($node){
 		$this->__common_attr($node);
 
-		$this->__set_default_attr($node, 'src');
+		$src = $this->__get_src($node, 'src');
+		$this->__setAttr($node, 'src', $src);
 		$this->__set_default_attr($node, 'width');
 		$this->__set_default_attr($node, 'height');
 		$this->__set_default_attr($node, 'alt');
@@ -156,19 +201,9 @@ class XssHtml {
 	private function __node_a($node){
 		$this->__common_attr($node);
 		$href = $this->__get_link($node, 'href');
-
 		$this->__setAttr($node, 'href', $href);
 		$this->__set_default_attr($node, 'target', '_blank');
-	}
-
-	private function __node_embed($node){
-		$this->__common_attr($node);
-		$link = $this->__get_link($node, 'src');
-
-		$this->__setAttr($node, 'src', $link);
-		$this->__setAttr($node, 'allowscriptaccess', 'never');
-		$this->__set_default_attr($node, 'width');
-		$this->__set_default_attr($node, 'height');
+		$this->__set_default_attr($node, 'rel', 'nofollow');
 	}
 
 	private function __node_default($node){
